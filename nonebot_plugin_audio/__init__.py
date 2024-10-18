@@ -8,7 +8,6 @@ import httpx
 from bs4 import BeautifulSoup
 import json
 import re
-from functools import lru_cache
 
 __plugin_meta__ = PluginMetadata(
     name="语音合成",
@@ -22,13 +21,18 @@ __plugin_meta__ = PluginMetadata(
 url = "https://yy.lolimi.cn/"
 available_roles = on_command("语音列表")
 audio_tts = on_regex(r"^(.*?)说(.*)$")  # 使用正则表达式捕获角色和文本
+audio_roles = None
 
 
-@lru_cache(maxsize=1)  # 使用lru_cache缓存结果
 async def get_audio_roles(url):
     """
     从网页中提取音频角色列表。
     """
+    # 如果已经获取过角色列表，直接返回
+    global audio_roles
+    if audio_roles is not None:
+        return audio_roles
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
@@ -50,13 +54,14 @@ async def get_audio_roles(url):
 
 @available_roles.handle()
 async def available_roles_handle(bot: Bot, event: Event):
-    available_roles = await get_audio_roles(url=url)
-    if available_roles is None:
+    global audio_roles
+    audio_roles = await get_audio_roles(url=url)
+    if audio_roles is None:
         logger.error("检索角色失败！")
         return
 
-    role_info = "可用的角色：" + "\n".join(
-        f"{i + 1}. {role}" for i, role in enumerate(available_roles)
+    role_info = "可用的角色：\n" + "\n".join(
+        f"{i + 1}. {role}" for i, role in enumerate(audio_roles)
     )
 
     await bot.send_forward_msg(
@@ -84,6 +89,7 @@ async def audio_tts_handle(
     text_to_speak = re.sub(r"\[.*\]", "", matched.group(2).strip())
     logger.info(f"角色: {selected_role}, 文本: {text_to_speak}")
 
+    global audio_roles
     audio_roles = await get_audio_roles(url)
     if audio_roles is None:
         logger.error("模型列表为空")
