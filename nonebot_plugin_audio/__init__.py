@@ -1,12 +1,23 @@
+from nonebot import on_command, logger
+from nonebot.adapters.onebot.v11 import Message, Event, Bot
+from nonebot.params import RegexMatched
+from nonebot import on_regex
+from nonebot.plugin import PluginMetadata
+
 import httpx
 from bs4 import BeautifulSoup
 import json
 import re
 from functools import lru_cache
-from nonebot import on_command, logger
-from nonebot.adapters.onebot.v11 import Message, Event, Bot
-from nonebot.params import RegexMatched
-from nonebot import on_regex
+
+__plugin_meta__ = PluginMetadata(
+    name="语音合成",
+    description="合成对应角色的语音",
+    type="application",
+    usage="语音列表:获取可合成角色列表\n[角色]说[文本]:合成语音",
+    homepage="https://github.com/StillMisty/nonebot_plugin_audio",
+)
+
 
 url = "https://yy.lolimi.cn/"
 available_roles = on_command("语音列表")
