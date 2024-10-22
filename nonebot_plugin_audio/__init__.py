@@ -92,17 +92,18 @@ async def audio_tts_handle(
     selected_role = matched.group(1).strip()
     text_to_speak = re.sub(r"\[.*\]", "", matched.group(2).strip())
     
-    if not 0 < len(text_to_speak.encode("utf-8")) < 100:
-        await bot.send(event, Message("字符长度应在 1 到 100 之间"))
-        return
-
     roles = await get_audio_roles(url)
     if roles is None:
         await bot.send(event, Message("获取角色列表失败"))
         return
-
+    
     if selected_role not in roles:
         return
+    
+    if not 0 < len(text_to_speak.encode("utf-8")) < 100:
+        await bot.send(event, Message("字符长度应在 1 到 100 之间"))
+        return
+
 
     audio_url = await generate_audio(url, selected_role, text_to_speak)
     if audio_url:
