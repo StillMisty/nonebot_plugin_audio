@@ -19,18 +19,18 @@ __plugin_meta__ = PluginMetadata(
 
 
 url = "https://yy.lolimi.cn/"
-available_roles = on_command("语音列表")
+available_roles = on_command("语音列表") # 获取可用角色列表，强制更新
 audio_tts = on_regex(r"^(.*?)说(.*)$")  # 使用正则表达式捕获角色和文本
 audio_roles = None  # 将 audio_roles 初始化为 None
 
 
-async def get_audio_roles(url):
+async def get_audio_roles(url: str, force_update: bool = False):
     """
     从网页中提取音频角色列表。
     """
     # 使用缓存机制，避免重复请求网页
     global audio_roles
-    if audio_roles is not None:
+    if audio_roles is not None and not force_update:
         return audio_roles
 
     try:
@@ -61,7 +61,7 @@ async def get_audio_roles(url):
 
 @available_roles.handle()
 async def available_roles_handle(bot: Bot, event: Event):
-    roles = await get_audio_roles(url=url)
+    roles = await get_audio_roles(url=url, force_update=True)
     if roles is None:
         await bot.send(event, Message("获取角色列表失败"))
         return
@@ -91,6 +91,10 @@ async def audio_tts_handle(
 ):
     selected_role = matched.group(1).strip()
     text_to_speak = re.sub(r"\[.*\]", "", matched.group(2).strip())
+    
+    if not 0 < len(text_to_speak.encode("utf-8")) < 100:
+        await bot.send(event, Message("字符长度应在 1 到 100 之间"))
+        return
 
     roles = await get_audio_roles(url)
     if roles is None:
@@ -98,7 +102,6 @@ async def audio_tts_handle(
         return
 
     if selected_role not in roles:
-        await bot.send(event, Message("角色不存在"))
         return
 
     audio_url = await generate_audio(url, selected_role, text_to_speak)
