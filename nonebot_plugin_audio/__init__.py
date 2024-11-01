@@ -5,8 +5,6 @@ from nonebot import on_regex
 from nonebot.plugin import PluginMetadata
 
 import httpx
-from bs4 import BeautifulSoup
-import json
 import re
 
 __plugin_meta__ = PluginMetadata(
@@ -17,58 +15,75 @@ __plugin_meta__ = PluginMetadata(
     homepage="https://github.com/StillMisty/nonebot_plugin_audio",
 )
 
+url = "https://api.3000y.ac.cn"
 
-url = "https://yy.lolimi.cn/"
-available_roles = on_command("语音列表") # 获取可用角色列表，强制更新
+available_roles = on_command("语音列表")
 audio_tts = on_regex(r"^(.*?)说(.*)$")  # 使用正则表达式捕获角色和文本
 audio_roles = None  # 将 audio_roles 初始化为 None
 
 
-async def get_audio_roles(url: str, force_update: bool = False):
-    """
-    从网页中提取音频角色列表。
-    """
-    # 使用缓存机制，避免重复请求网页
-    global audio_roles
-    if audio_roles is not None and not force_update:
-        return audio_roles
+async def get_audio_roles(url: str = f"{url}/v1/gpt-audio-role") -> set[str] | None:
+    """获取可合成角色列表。
 
+    Args:
+        url (str): 网址
+
+    Returns:
+        set[str]: 角色列表
+    """
+
+    global audio_roles
+    if audio_roles is not None:
+        return audio_roles
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(url)
-            response.raise_for_status()  # 检查响应状态码
-
-        soup = BeautifulSoup(response.content, "html.parser")
-        select_element = soup.find("select", id="audioRole")
-        if select_element:
-            options = select_element.find_all("option")
-            audio_roles = [option.text for option in options]
-            return audio_roles
-        else:
-            logger.error("无法找到角色列表选择框")
+            response.raise_for_status()
+        res = response.json()
+        if res["code"] != 200:
+            logger.error(f"请求错误: {response.json()['msg']}")
             return None
 
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP 错误: {e}")
-        return None
-    except httpx.RequestError as e:
-        logger.error(f"网络请求错误: {e}")
-        return None
+        return set(res["data"])
     except Exception as e:
-        logger.error(f"其他错误: {e}")
+        logger.error(f"请求错误: {e}")
+
+
+async def generate_audio(
+    role: str, text: str, url: str = f"{url}/v1/gpt-audio"
+) -> str | None:
+    """生成语音。
+
+    Args:
+        url (str): 网址
+        role (str): 角色
+        text (str): 文本
+
+    Returns:
+        str: 语音链接
+    """
+    async with httpx.AsyncClient() as client:
+        data = {"role": role, "input": text}
+        response = await client.post(url, json=data,timeout=30)
+        response.raise_for_status()
+    res = response.json()
+    if res["code"] != 200:
+        logger.error(f"请求错误: {response.json()['msg']}")
         return None
+    return res["data"]
 
 
 @available_roles.handle()
-async def available_roles_handle(bot: Bot, event: Event):
-    roles = await get_audio_roles(url=url, force_update=True)
-    if roles is None:
-        await bot.send(event, Message("获取角色列表失败"))
-        return
+async def handle_audio_roles(bot: Bot, event: Event):
+    audio_roles = await get_audio_roles()
+    if audio_roles is None:
+        await available_roles.finish("获取角色列表失败")
 
-    role_info = "可用的角色：\n" + "\n".join(
-        f"{i + 1}. {role}" for i, role in enumerate(roles)
+    msg = "可合成角色列表：\n" + "\n".join(
+        f"{i + 1}. {role}" for i, role in enumerate(audio_roles)
     )
+
+    # 转发消息，防止刷屏
     await bot.send_forward_msg(
         user_id=event.user_id,  # 私聊时使用 user_id
         group_id=getattr(event, "group_id", None),  # 群聊时使用 group_id
@@ -78,7 +93,7 @@ async def available_roles_handle(bot: Bot, event: Event):
                 "data": {
                     "name": "消息发送者A",
                     "uin": "10086",
-                    "content": [{"type": "text", "data": {"text": role_info}}],
+                    "content": [{"type": "text", "data": {"text": msg}}],
                 },
             }
         ],
@@ -86,59 +101,19 @@ async def available_roles_handle(bot: Bot, event: Event):
 
 
 @audio_tts.handle()
-async def audio_tts_handle(
-    bot: Bot, event: Event, matched: re.Match[str] = RegexMatched()
-):
-    selected_role = matched.group(1).strip()
-    text_to_speak = re.sub(r"\[.*\]", "", matched.group(2).strip())
-    
-    roles = await get_audio_roles(url)
-    if roles is None:
-        await bot.send(event, Message("获取角色列表失败"))
-        return
-    
-    if selected_role not in roles:
-        return
-    
-    if not 0 < len(text_to_speak.encode("utf-8")) < 100:
-        await bot.send(event, Message("字符长度应在 1 到 100 之间"))
+async def handle_audio_tts(matched: re.Match[str] = RegexMatched()):
+    role = matched.group(1).strip()
+    text = matched.group(2).strip()
+
+    audio_roles = await get_audio_roles()
+    if audio_roles is None:
+        await audio_tts.finish("获取角色列表失败")
+
+    if role not in audio_roles:
         return
 
-
-    audio_url = await generate_audio(url, selected_role, text_to_speak)
+    audio_url = await generate_audio(role, text)
     if audio_url:
-        await bot.send(event, Message(f"[CQ:record,file={audio_url}]"))
+        await audio_tts.finish(Message(f"[CQ:record,file={audio_url}]"))
     else:
-        await bot.send(event, Message("语音合成错误"))
-
-
-async def generate_audio(url, role, text):
-    """
-    模拟生成音频的请求并返回音频链接。
-    """
-    try:
-        data = {"role": role, "text": text}
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(f"{url}/index/audio", data=data)
-            response.raise_for_status()
-
-        result = response.json()
-        if result["code"] == 0:
-            return result["data"]
-        else:
-            logger.error(f"音频生成失败: {result['message']}")
-            return None
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP 错误: {e}")
-        return None
-    except httpx.RequestError as e:
-        logger.error(f"网络请求错误: {e}")
-        return None
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.error(f"解析返回数据错误: {e}, 响应内容: {response.text}")
-        return None
-    except Exception as e:
-        logger.error(f"其他错误: {e}")
-        return None
+        await audio_tts.finish("语音合成错误")
