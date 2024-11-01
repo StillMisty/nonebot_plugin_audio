@@ -22,18 +22,21 @@ audio_tts = on_regex(r"^(.*?)说(.*)$")  # 使用正则表达式捕获角色和�
 audio_roles = None  # 将 audio_roles 初始化为 None
 
 
-async def get_audio_roles(url: str = f"{url}/v1/gpt-audio-role") -> set[str] | None:
+async def get_audio_roles(
+    url: str = f"{url}/v1/gpt-audio-role", fresh: bool = False
+) -> set[str] | None:
     """获取可合成角色列表。
 
     Args:
         url (str): 网址
-
+        fresh (bool): 是否强制刷新
     Returns:
         set[str]: 角色列表
     """
 
     global audio_roles
-    if audio_roles is not None:
+    # 如果已经获取过角色列表且不强制刷新，则直接返回
+    if audio_roles is not None and not fresh:
         return audio_roles
     try:
         async with httpx.AsyncClient() as client:
@@ -64,7 +67,7 @@ async def generate_audio(
     """
     async with httpx.AsyncClient() as client:
         data = {"role": role, "input": text}
-        response = await client.post(url, json=data,timeout=30)
+        response = await client.post(url, json=data, timeout=60)
         response.raise_for_status()
     res = response.json()
     if res["code"] != 200:
@@ -75,7 +78,7 @@ async def generate_audio(
 
 @available_roles.handle()
 async def handle_audio_roles(bot: Bot, event: Event):
-    audio_roles = await get_audio_roles()
+    audio_roles = await get_audio_roles(fresh=True)
     if audio_roles is None:
         await available_roles.finish("获取角色列表失败")
 
@@ -112,7 +115,12 @@ async def handle_audio_tts(matched: re.Match[str] = RegexMatched()):
     if role not in audio_roles:
         return
 
-    audio_url = await generate_audio(role, text)
+    try:
+        audio_url = await generate_audio(role, text)
+    except httpx.ReadTimeout:
+        audio_tts.finish("语音合成超时")
+        return
+    
     if audio_url:
         await audio_tts.finish(Message(f"[CQ:record,file={audio_url}]"))
     else:
