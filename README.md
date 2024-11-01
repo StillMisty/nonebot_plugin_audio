@@ -10,5 +10,5 @@
 ## 依赖
 
 ```shell
-pip install beautifulsoup4 httpx
+pip install httpx
 ```
