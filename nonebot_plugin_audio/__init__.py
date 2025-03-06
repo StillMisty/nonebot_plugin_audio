@@ -1,11 +1,10 @@
-from nonebot import on_command, logger
-from nonebot.adapters.onebot.v11 import Message, Event, Bot
-from nonebot.params import RegexMatched
-from nonebot import on_regex
-from nonebot.plugin import PluginMetadata
+import re
 
 import httpx
-import re
+from nonebot import logger, on_command, on_regex
+from nonebot.adapters.onebot.v11 import Bot, Event, MessageSegment
+from nonebot.params import RegexMatched
+from nonebot.plugin import PluginMetadata
 
 __plugin_meta__ = PluginMetadata(
     name="语音合成",
@@ -36,7 +35,7 @@ async def get_audio_roles(
 
     global audio_roles
     # 如果已经获取过角色列表且不强制刷新，则直接返回
-    if audio_roles is not None and not fresh:
+    if audio_roles and not fresh:
         return audio_roles
     try:
         async with httpx.AsyncClient() as client:
@@ -80,7 +79,8 @@ async def generate_audio(
 async def handle_audio_roles(bot: Bot, event: Event):
     audio_roles = await get_audio_roles(fresh=True)
     if audio_roles is None:
-        await available_roles.finish("获取角色列表失败")
+        await audio_tts.finish("获取角色列表失败")
+        return
 
     msg = "可合成角色列表：\n" + "\n".join(
         f"{i + 1}. {role}" for i, role in enumerate(audio_roles)
@@ -110,7 +110,7 @@ async def handle_audio_tts(matched: re.Match[str] = RegexMatched()):
 
     audio_roles = await get_audio_roles()
     if audio_roles is None:
-        await audio_tts.finish("获取角色列表失败")
+        return
 
     if role not in audio_roles:
         return
@@ -120,8 +120,8 @@ async def handle_audio_tts(matched: re.Match[str] = RegexMatched()):
     except httpx.ReadTimeout:
         audio_tts.finish("语音合成超时")
         return
-    
+
     if audio_url:
-        await audio_tts.finish(Message(f"[CQ:record,file={audio_url}]"))
+        await audio_tts.finish(MessageSegment.record(file=audio_url))
     else:
         await audio_tts.finish("语音合成错误")
